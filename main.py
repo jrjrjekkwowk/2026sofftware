@@ -1,0 +1,289 @@
+"""
+학생용 학습 타이머 (Streamlit)
+- 시작 / 일시정지 / 초기화
+- 과목별 기록 저장, 오늘 목표 진행률, 과목별 통계
+- CSV 내보내기 / 불러오기 (클라우드는 서버 재시작 시 기록이 사라지므로 백업용)
+
+실행: streamlit run main.py
+"""
+
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import streamlit as st
+
+KST = ZoneInfo("Asia/Seoul")
+DEFAULT_SUBJECTS = ["국어", "수학", "영어", "통합사회", "통합과학", "한국사"]
+COLUMNS = ["날짜", "과목", "시작", "종료", "공부시간(초)", "메모"]
+
+st.set_page_config(page_title="학습 타이머", page_icon="⏱️", layout="centered")
+
+
+# ---------------------------------------------------------------------------
+# 상태 초기화 (Streamlit은 버튼을 누를 때마다 스크립트를 처음부터 다시 실행하므로
+# 타이머 값은 session_state에 보관해야 유지됨)
+# ---------------------------------------------------------------------------
+def init_state():
+    defaults = {
+        "running": False,        # 타이머가 돌아가는 중인지
+        "start_ts": None,        # 마지막으로 '시작'을 누른 시각 (epoch 초)
+        "elapsed": 0.0,          # 일시정지 전까지 누적된 시간(초)
+        "session_start": None,   # 이번 공부 세션이 처음 시작된 시각
+        "subjects": DEFAULT_SUBJECTS.copy(),
+        "records": [],           # 저장된 공부 기록 리스트
+        "flash": None,           # 화면에 한 번 띄울 메시지 (종류, 내용)
+        "daily_goal": 180,       # 오늘 목표(분)
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+init_state()
+ss = st.session_state
+
+
+# ---------------------------------------------------------------------------
+# 유틸 함수
+# ---------------------------------------------------------------------------
+def current_elapsed() -> float:
+    """현재까지 경과 시간(초)."""
+    if ss.running and ss.start_ts is not None:
+        return ss.elapsed + (time.time() - ss.start_ts)
+    return ss.elapsed
+
+
+def fmt(seconds: float) -> str:
+    """초 → HH:MM:SS"""
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def fmt_minutes(seconds: float) -> str:
+    """초 → 'X시간 Y분'"""
+    minutes = int(seconds // 60)
+    h, m = divmod(minutes, 60)
+    return f"{h}시간 {m}분" if h else f"{m}분"
+
+
+def records_df() -> pd.DataFrame:
+    if not ss.records:
+        return pd.DataFrame(columns=COLUMNS)
+    return pd.DataFrame(ss.records, columns=COLUMNS)
+
+
+# ---------------------------------------------------------------------------
+# 버튼 콜백
+# ---------------------------------------------------------------------------
+def on_start():
+    if not ss.running:
+        ss.start_ts = time.time()
+        ss.running = True
+        if ss.session_start is None:
+            ss.session_start = datetime.now(KST)
+
+
+def on_pause():
+    if ss.running and ss.start_ts is not None:
+        ss.elapsed += time.time() - ss.start_ts
+        ss.running = False
+        ss.start_ts = None
+
+
+def on_reset():
+    ss.running = False
+    ss.start_ts = None
+    ss.elapsed = 0.0
+    ss.session_start = None
+
+
+def on_save():
+    on_pause()
+    if ss.elapsed < 1:
+        ss.flash = ("warning", "저장할 공부 시간이 없어요. 먼저 타이머를 시작해 주세요.")
+        return
+
+    end = datetime.now(KST)
+    start = ss.session_start or end
+    subject = ss.get("subject_select", "기타")
+
+    ss.records.append({
+        "날짜": start.strftime("%Y-%m-%d"),
+        "과목": subject,
+        "시작": start.strftime("%H:%M:%S"),
+        "종료": end.strftime("%H:%M:%S"),
+        "공부시간(초)": int(ss.elapsed),
+        "메모": ss.get("memo_input", "").strip(),
+    })
+    ss.flash = ("success", f"{subject} {fmt_minutes(ss.elapsed)} 기록 완료!")
+    ss.memo_input = ""
+    on_reset()
+
+
+def on_add_subject():
+    name = ss.get("new_subject", "").strip()
+    if not name:
+        return
+    if name in ss.subjects:
+        ss.flash = ("warning", f"'{name}'은(는) 이미 있는 과목이에요.")
+    else:
+        ss.subjects.append(name)
+        ss.flash = ("success", f"'{name}' 과목을 추가했어요.")
+    ss.new_subject = ""
+
+
+def on_delete_last():
+    if ss.records:
+        removed = ss.records.pop()
+        ss.flash = ("info", f"마지막 기록({removed['과목']} {removed['시작']})을 삭제했어요.")
+
+
+# ---------------------------------------------------------------------------
+# 사이드바: 과목 관리, 목표, 백업
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ 설정")
+
+    st.subheader("과목 추가")
+    st.text_input("새 과목 이름", key="new_subject", placeholder="예: 정보")
+    st.button("추가", on_click=on_add_subject, width="stretch")
+
+    st.subheader("오늘 목표")
+    st.number_input("목표 공부시간(분)", min_value=10, max_value=1440,
+                    step=10, key="daily_goal")
+
+    st.subheader("기록 백업 / 복원")
+    st.caption("클라우드 서버가 재시작되면 기록이 지워져요. 공부 끝나면 CSV로 저장해 두세요.")
+
+    df_backup = records_df()
+    st.download_button(
+        "📥 CSV 다운로드",
+        data=df_backup.to_csv(index=False).encode("utf-8-sig"),  # 엑셀 한글 깨짐 방지
+        file_name=f"study_log_{datetime.now(KST):%Y%m%d}.csv",
+        mime="text/csv",
+        width="stretch",
+        disabled=df_backup.empty,
+    )
+
+    uploaded = st.file_uploader("CSV 불러오기", type="csv")
+    if uploaded is not None and st.button("불러오기", width="stretch"):
+        try:
+            loaded = pd.read_csv(uploaded, encoding="utf-8-sig")
+            missing = [c for c in COLUMNS if c not in loaded.columns]
+            if missing:
+                st.error(f"형식이 맞지 않아요. 없는 열: {', '.join(missing)}")
+            else:
+                loaded["메모"] = loaded["메모"].fillna("").astype(str)
+                loaded["공부시간(초)"] = loaded["공부시간(초)"].fillna(0).astype(int)
+                existing = {(r["날짜"], r["시작"], r["과목"]) for r in ss.records}
+                added = 0
+                for row in loaded[COLUMNS].to_dict("records"):
+                    key = (str(row["날짜"]), str(row["시작"]), str(row["과목"]))
+                    if key not in existing:       # 중복 기록은 건너뜀
+                        ss.records.append(row)
+                        existing.add(key)
+                        added += 1
+                    if row["과목"] not in ss.subjects:
+                        ss.subjects.append(row["과목"])
+                st.success(f"{added}개 기록을 불러왔어요.")
+        except Exception as e:
+            st.error(f"파일을 읽지 못했어요: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 메인: 타이머
+# ---------------------------------------------------------------------------
+st.title("⏱️ 학습 타이머")
+
+if ss.flash:
+    kind, msg = ss.flash
+    getattr(st, kind)(msg)
+    ss.flash = None
+
+st.selectbox("공부할 과목", ss.subjects, key="subject_select",
+             disabled=ss.running)  # 공부 중에는 과목 변경 잠금
+
+
+# 타이머가 돌아갈 때만 1초마다 이 부분만 새로 그림 (전체 페이지 새로고침 X)
+@st.fragment(run_every=1 if ss.running else None)
+def timer_display():
+    elapsed = current_elapsed()
+    color = "#2e7d32" if ss.running else ("#f57c00" if elapsed > 0 else "#9e9e9e")
+    status = "공부 중" if ss.running else ("일시정지" if elapsed > 0 else "대기")
+    st.markdown(
+        f"""
+        <div style="text-align:center; padding:12px 0;">
+            <div style="font-size:72px; font-weight:700; color:{color};
+                        font-variant-numeric:tabular-nums; letter-spacing:2px;">
+                {fmt(elapsed)}
+            </div>
+            <div style="font-size:16px; color:{color};">● {status}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+timer_display()
+
+c1, c2, c3 = st.columns(3)
+c1.button("▶ 시작", on_click=on_start, disabled=ss.running,
+          width="stretch", type="primary")
+c2.button("⏸ 일시정지", on_click=on_pause, disabled=not ss.running,
+          width="stretch")
+c3.button("↺ 초기화", on_click=on_reset, width="stretch")
+
+st.text_input("메모 (선택)", key="memo_input", placeholder="예: 수학 기출 3회분")
+st.button("💾 이번 공부 기록 저장", on_click=on_save, width="stretch")
+
+st.divider()
+
+
+# ---------------------------------------------------------------------------
+# 통계
+# ---------------------------------------------------------------------------
+df = records_df()
+today = datetime.now(KST).strftime("%Y-%m-%d")
+today_df = df[df["날짜"].astype(str) == today]
+today_sec = int(today_df["공부시간(초)"].sum()) if not today_df.empty else 0
+goal_sec = ss.daily_goal * 60
+
+st.subheader("📊 오늘의 공부")
+m1, m2, m3 = st.columns(3)
+m1.metric("오늘 총 공부", fmt_minutes(today_sec))
+m2.metric("기록 수", f"{len(today_df)}회")
+m3.metric("목표 달성률", f"{min(today_sec / goal_sec, 1) * 100:.0f}%")
+st.progress(min(today_sec / goal_sec, 1.0))
+
+if df.empty:
+    st.info("아직 기록이 없어요. 과목을 고르고 ▶ 시작을 눌러 보세요.")
+else:
+    tab1, tab2, tab3 = st.tabs(["오늘 과목별", "전체 과목별", "전체 기록"])
+
+    with tab1:
+        if today_df.empty:
+            st.caption("오늘 기록이 아직 없어요.")
+        else:
+            by_subj = (today_df.groupby("과목")["공부시간(초)"].sum() / 60).round(1)
+            st.bar_chart(by_subj.rename("공부시간(분)"))
+
+    with tab2:
+        total = df.groupby("과목")["공부시간(초)"].sum().sort_values(ascending=False)
+        summary = pd.DataFrame({
+            "총 공부시간": total.apply(fmt_minutes),
+            "비율": (total / total.sum() * 100).round(1).astype(str) + "%",
+            "기록 수": df.groupby("과목").size().reindex(total.index),
+        })
+        st.dataframe(summary, width="stretch")
+        st.bar_chart((total / 60).round(1).rename("공부시간(분)"))
+
+    with tab3:
+        show = df.copy()
+        show["공부시간"] = show["공부시간(초)"].apply(fmt)
+        show = show.drop(columns=["공부시간(초)"]).iloc[::-1]  # 최신순
+        st.dataframe(show, width="stretch", hide_index=True)
+        st.button("🗑 마지막 기록 삭제", on_click=on_delete_last)
