@@ -30,6 +30,7 @@ pages = {
     "관리": [
         st.Page("players.py", title="선수 등록 · 수정", icon="📝"),
         st.Page("manage.py", title="데이터 백업 · 복원", icon="💾"),
+        st.Page("share.py", title="앱 공유 (QR 코드)", icon="📱"),
     ],
 }
 
