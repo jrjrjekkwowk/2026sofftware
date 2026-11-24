@@ -46,5 +46,5 @@ with st.expander("🧪 테스트용 샘플 선수 10명 넣기"):
     st.caption("기능 시험용이에요. 실제 사용 전에는 위의 '선수 삭제'로 지우면 돼요.")
     if st.button("샘플 선수 넣기"):
         for i in range(1, 11):
-            data.add_player(f"테스트{i}", (i % 3) + 1, data.POSITIONS[i % 4])
+            data.add_player(f"테스트{i}", (i % 3) + 1, data.POSITIONS[i % len(data.POSITIONS)])
         st.rerun()
