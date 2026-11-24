@@ -112,12 +112,12 @@ def goal_panel(column, team_key: str, team_name: str, roster: list):
         assist_options = [NO_ASSIST] + [p for p in roster if p != scorer]
         assist = st.selectbox("도움", assist_options, key=f"assist_{team_key}")
         goal_type = st.selectbox("골 유형", data.GOAL_TYPES, key=f"type_{team_key}")
-                     # 시간 직접 입력: 켜면 입력한 분으로, 끄면 킥오프부터 흐른 실제 시간으로 기록한다
+        # 시간 직접 입력: 켜면 입력한 분으로, 끄면 킥오프부터 흐른 실제 시간으로 기록한다
         manual = st.toggle("⏱️ 시간 직접 입력", key=f"manual_{team_key}")
         typed = st.number_input("몇 분?", min_value=1, max_value=120, value=min(minute, 120), step=1,
                                 key=f"min_{team_key}", disabled=not manual)
         if st.button(f"⚽ {team_name} 골!", key=f"goal_{team_key}", type="primary", width="stretch"):
-                        now_minute = int(typed) if manual else data.minutes_played(live["kickoff"])
+            now_minute = int(typed) if manual else data.minutes_played(live["kickoff"])
             data.add_goal(match_id, team_key, scorer, "" if assist == NO_ASSIST else assist,
                           goal_type, now_minute)
             st.toast(f"{now_minute}' 골! {scorer}" + (f" (도움 {assist})" if assist != NO_ASSIST else ""))
