@@ -16,6 +16,38 @@ import stats
 st.title("⚽ 킥로그 KickLog")
 st.caption("우리 학교 전용 풋몹 · 주말 축구, 이제 기록으로 남기자")
 
+# ---- 개발자 후원 버튼 (홈 화면 맨 위에 크게) ----
+# 계좌는 코드에 적지 않고 Streamlit Cloud의 Secrets(비밀 설정)에 넣는다 → GitHub에 공개되지 않는다
+try:
+    DONATE_BANK = st.secrets.get("DONATE_BANK", "")
+    DONATE_ACCOUNT = st.secrets.get("DONATE_ACCOUNT", "")
+except Exception:  # Secrets 설정이 아예 없을 때도 앱이 멈추지 않게
+    DONATE_BANK = DONATE_ACCOUNT = ""
+
+
+@st.dialog("💸 개발자 서버비 내주기")
+def donate_popup():
+    st.write("킥로그가 도움이 됐다면 서버비를 보태 주세요. 보내 주신 마음은 서버 유지와 새 기능 개발에 쓸게요.")
+    if DONATE_ACCOUNT:
+        st.caption(DONATE_BANK)
+        st.code(DONATE_ACCOUNT, language=None)  # 오른쪽 복사 아이콘으로 계좌번호 복사
+        st.caption("👆 오른쪽 아이콘을 누르면 계좌번호가 복사돼요")
+    else:
+        st.info("후원 계좌는 준비 중이에요. 마음만으로도 감사해요 🙏")
+
+
+st.markdown("""<style>
+.st-key-donate button {
+    padding: 1rem 0; border: none; border-radius: 14px;
+    background: linear-gradient(90deg, #198754, #20c997); color: white !important;
+}
+.st-key-donate p { font-size: 1.35rem; font-weight: 800; }
+</style>""", unsafe_allow_html=True)
+with st.container(key="donate"):
+    if st.button("💸 개발자 서버비 내주기", width="stretch"):
+        donate_popup()
+st.caption("킥로그는 학생 개발자가 직접 만들고 운영해요. 후원금은 서버비와 새 기능 개발에 쓰여요.")
+
 players, matches = data.load("players"), data.load("matches")
 goals, ratings = data.load("goals"), data.load("ratings")
 
